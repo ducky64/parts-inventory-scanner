@@ -1,5 +1,6 @@
 import cv2
 import zxingcpp
+import datetime
 
 kWindowName = "PartsScanner"
 kFrameWidth = 1920
@@ -10,6 +11,9 @@ kFontScale = 0.5
 kRoiWidth = 240  # center-aligned region-of-interest
 kRoiHeight = 240
 
+kBarcodeTimeoutThreshold = datetime.timedelta(seconds=2)  # after not seeing a barcode for this long, count as a new one
+
+last_seen_times = {}  # text -> time
 
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
@@ -19,6 +23,7 @@ if __name__ == '__main__':
   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, kFrameHeight)
 
   while True:
+    frame_time = datetime.datetime.now()
     ticks = cv2.getTickCount()
     ret, frame = cap.read()
     assert ret, "failed to get frame"
@@ -53,11 +58,20 @@ if __name__ == '__main__':
       return (woff + pos.x, hoff + pos.y)
 
     for result in results:
+      last_seen = last_seen_times.get(result.text, datetime.datetime(1990, 1, 1))
+      if frame_time - last_seen > kBarcodeTimeoutThreshold:
+        frame_thick = 4
+        print(f"{result.text}")
+      else:
+        frame_thick = 1
+      last_seen_times[result.text] = frame_time
+
       pos = result.position
-      cv2.line(frame, zxing_pos_to_cv2(pos.top_left), zxing_pos_to_cv2(pos.top_right), (0, 255, 0), 1)
-      cv2.line(frame, zxing_pos_to_cv2(pos.top_right), zxing_pos_to_cv2(pos.bottom_right), (0, 255, 0), 1)
-      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_right), zxing_pos_to_cv2(pos.bottom_left), (0, 255, 0), 1)
-      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_left), zxing_pos_to_cv2(pos.top_left), (0, 255, 0), 1)
+      cv2.line(frame, zxing_pos_to_cv2(pos.top_left), zxing_pos_to_cv2(pos.top_right), (0, 255, 0), frame_thick)
+      cv2.line(frame, zxing_pos_to_cv2(pos.top_right), zxing_pos_to_cv2(pos.bottom_right), (0, 255, 0), frame_thick)
+      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_right), zxing_pos_to_cv2(pos.bottom_left), (0, 255, 0), frame_thick)
+      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_left), zxing_pos_to_cv2(pos.top_left), (0, 255, 0), frame_thick)
+
       cv2.putText(frame, f"{result.text}", (woff + pos.top_left.x, hoff + pos.top_left.y),
                   cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 255, 0), 1)
 
