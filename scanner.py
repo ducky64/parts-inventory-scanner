@@ -5,6 +5,7 @@ import zxingcpp
 import numpy as np
 import datetime
 import sys
+import beepy
 
 from queue import Queue
 from threading import Thread
@@ -17,15 +18,26 @@ kFrameHeight = 1080
 
 kFontScale = 0.5
 
-kRoiWidth = 280  # center-aligned region-of-interest
+kRoiWidth = 280  # center-aligned region-of-interest - speeds up scanning
 kRoiHeight = 280
 
 kBarcodeTimeoutThreshold = datetime.timedelta(seconds=4)  # after not seeing a barcode for this long, count as a new one
 
-last_seen_times = {}  # text -> time
+kCsvHeaders = ['barcode',  # entire barcode, unique, used as a key
+               'supplier_part',  # manufacturer part number
+               'desc',  # catalog description
+               'pack_qty',  # quantity as packed
+               'mod_qty',  # quantity modifier from pack_qty, eg -20
+               'dist_data',  # entire distributor data response
+               'scan_time',  # initial scan time
+               'update_time'  # last row updated time
+               ]
+
+last_seen_times = {}  # text -> time, used for scan antiduplication
 
 
 data_queue = Queue()
+beep_queue = Queue()
 
 
 def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
@@ -81,6 +93,7 @@ def scan_fn(cap: cv2.VideoCapture):
     for barcode in results:
       last_seen = last_seen_times.get(barcode.text, datetime.datetime(1990, 1, 1))
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
+        beep_queue.put(1)
         data_queue.put(barcode)
         frame_thick = 4
       else:
@@ -119,6 +132,11 @@ def csv_fn():
       print(f"{distributor} {decoded}")
 
 
+def beep_fn():
+  while True:
+    beepy.beep(sound=beep_queue.get())  # beep seems to be blocking, so it gets its own thread
+
+
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
   cap = cv2.VideoCapture(0)  # TODO configurable
@@ -127,7 +145,9 @@ if __name__ == '__main__':
   scan_thread = Thread(target=scan_fn, args=(cap, ))
   console_thread = Thread(target=console_fn)
   csv_thread = Thread(target=csv_fn)
+  beep_thread = Thread(target=beep_fn)
 
   scan_thread.start()
   console_thread.start()
   csv_thread.start()
+  beep_thread.start()
