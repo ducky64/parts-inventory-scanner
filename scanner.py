@@ -61,7 +61,7 @@ if __name__ == '__main__':
       last_seen = last_seen_times.get(result.text, datetime.datetime(1990, 1, 1))
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
         frame_thick = 4
-        print(f"{result.text}")
+        print(f"{result.text.encode('unicode-escape')}")
       else:
         frame_thick = 1
       last_seen_times[result.text] = frame_time
