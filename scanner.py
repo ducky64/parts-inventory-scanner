@@ -1,3 +1,5 @@
+from typing import Optional
+
 import cv2
 import zxingcpp
 import datetime
@@ -10,12 +12,24 @@ kFrameHeight = 1080
 
 kFontScale = 0.5
 
-kRoiWidth = 240  # center-aligned region-of-interest
-kRoiHeight = 240
+kRoiWidth = 280  # center-aligned region-of-interest
+kRoiHeight = 280
 
 kBarcodeTimeoutThreshold = datetime.timedelta(seconds=2)  # after not seeing a barcode for this long, count as a new one
 
 last_seen_times = {}  # text -> time
+
+
+def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
+  """Guesses the distributor from barcode metadata and decoded data"""
+  if barcode.format == zxingcpp.BarcodeFormat.DataMatrix:
+    if '20Z' in decoded.data:
+      return 'Digikey'
+    else:
+      return 'Mouser'
+  else:
+    return None
+
 
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
@@ -59,23 +73,25 @@ if __name__ == '__main__':
     def zxing_pos_to_cv2(pos):
       return (woff + pos.x, hoff + pos.y)
 
-    for result in results:
-      last_seen = last_seen_times.get(result.text, datetime.datetime(1990, 1, 1))
+    for barcode in results:
+      last_seen = last_seen_times.get(barcode.text, datetime.datetime(1990, 1, 1))
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
+        decoded = Iso15434.from_data(barcode.text)
+        dist = guess_distributor(barcode, decoded)
+        print(f"{dist}: {decoded}")
+
         frame_thick = 4
-        print(f"{result.text.encode('unicode-escape')}")
-        print(Iso15434.from_data(result.text))
       else:
         frame_thick = 1
-      last_seen_times[result.text] = frame_time
+      last_seen_times[barcode.text] = frame_time
 
-      pos = result.position
+      pos = barcode.position
       cv2.line(frame, zxing_pos_to_cv2(pos.top_left), zxing_pos_to_cv2(pos.top_right), (0, 255, 0), frame_thick)
       cv2.line(frame, zxing_pos_to_cv2(pos.top_right), zxing_pos_to_cv2(pos.bottom_right), (0, 255, 0), frame_thick)
       cv2.line(frame, zxing_pos_to_cv2(pos.bottom_right), zxing_pos_to_cv2(pos.bottom_left), (0, 255, 0), frame_thick)
       cv2.line(frame, zxing_pos_to_cv2(pos.bottom_left), zxing_pos_to_cv2(pos.top_left), (0, 255, 0), frame_thick)
 
-      cv2.putText(frame, f"{result.text}", (woff + pos.top_left.x, hoff + pos.top_left.y),
+      cv2.putText(frame, f"{barcode.text}", (woff + pos.top_left.x, hoff + pos.top_left.y),
                   cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 255, 0), 1)
 
     cv2.imshow(kWindowName, frame)
