@@ -2,6 +2,8 @@ import cv2
 import zxingcpp
 import datetime
 
+from eigp144 import Eigp144
+
 kWindowName = "PartsScanner"
 kFrameWidth = 1920
 kFrameHeight = 1080
@@ -62,6 +64,7 @@ if __name__ == '__main__':
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
         frame_thick = 4
         print(f"{result.text.encode('unicode-escape')}")
+        print(Eigp144.from_data(result.text))
       else:
         frame_thick = 1
       last_seen_times[result.text] = frame_time
