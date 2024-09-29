@@ -1,10 +1,9 @@
 import cv2
-from PIL import Image
-from pylibdmtx.pylibdmtx import decode
+import zxingcpp
 
 kWindowName = "PartsScanner"
-kFrameWidth = 1280
-kFrameHeight = 720
+kFrameWidth = 1920
+kFrameHeight = 1080
 
 kFontScale = 0.5
 
@@ -28,8 +27,11 @@ if __name__ == '__main__':
     # only scan a small RoI since decode is extremely slow
     roi = frame[h//2 - kRoiHeight//2 : h//2 + kRoiHeight//2,
           w//2 - kRoiWidth//2 : w//2 + kRoiWidth//2]
+    roi = cv2.fastNlMeansDenoisingColored(roi, None, 10, 10, 7, 21)
     roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
-    decodeds = decode(roi, max_count=1, timeout=250)
+    roi = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    # roi = cv2.multiply(roi, roi_msk)
+    results = zxingcpp.read_barcodes(roi, formats=zxingcpp.BarcodeFormat.DataMatrix)
 
     # display for user
     # analysis ROI display
@@ -41,16 +43,26 @@ if __name__ == '__main__':
     cv2.line(frame, (w//2, h//2 - kRoiHeight//2), (w//2, h//2 + kRoiHeight//2), (0, 0, 255), 1)
     cv2.line(frame, (w//2 - kRoiWidth//2, h//2), (w//2 + kRoiWidth//2, h//2), (0, 0, 255), 1)
 
-    woff = w//2 - kRoiWidth//2  # correct for RoI
-    hoff = h//2 + kRoiHeight//2
+    cv2.putText(frame, f"{results}", (w//2 - kRoiWidth//2, h//2 + kRoiHeight//2),
+                cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 0, 255), 1)
 
-    for decoded in decodeds:
-      rect = decoded.rect
-      cv2.rectangle(frame, (woff + rect.left, hoff - rect.top - rect.height),
-                    (woff + rect.left + rect.width, hoff - rect.top),
-                    (0, 255, 0), 1)
-      cv2.putText(frame, f"{decoded.data}", (woff + rect.left, hoff + rect.top),
+    woff = w//2 - kRoiWidth//2  # correct for RoI
+    hoff = h//2 - kRoiHeight//2
+
+    def zxing_pos_to_cv2(pos):
+      return (woff + pos.x, hoff + pos.y)
+
+    for result in results:
+      pos = result.position
+      cv2.line(frame, zxing_pos_to_cv2(pos.top_left), zxing_pos_to_cv2(pos.top_right), (0, 255, 0), 1)
+      cv2.line(frame, zxing_pos_to_cv2(pos.top_right), zxing_pos_to_cv2(pos.bottom_right), (0, 255, 0), 1)
+      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_right), zxing_pos_to_cv2(pos.bottom_left), (0, 255, 0), 1)
+      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_left), zxing_pos_to_cv2(pos.top_left), (0, 255, 0), 1)
+      cv2.putText(frame, f"{result.text}", (woff + pos.top_left.x, hoff + pos.top_left.y),
                   cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 255, 0), 1)
 
     cv2.imshow(kWindowName, frame)
-    cv2.waitKey(1)  # delay
+    cv2.imshow(kWindowName + "b", roi)
+    key = cv2.waitKey(1)  # delay
+    if key == ord('q'):
+      break
