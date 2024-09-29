@@ -4,6 +4,10 @@ import cv2
 import zxingcpp
 import numpy as np
 import datetime
+import sys
+
+from queue import Queue
+from threading import Thread
 
 from iso15434 import Iso15434
 
@@ -16,9 +20,12 @@ kFontScale = 0.5
 kRoiWidth = 280  # center-aligned region-of-interest
 kRoiHeight = 280
 
-kBarcodeTimeoutThreshold = datetime.timedelta(seconds=2)  # after not seeing a barcode for this long, count as a new one
+kBarcodeTimeoutThreshold = datetime.timedelta(seconds=4)  # after not seeing a barcode for this long, count as a new one
 
 last_seen_times = {}  # text -> time
+
+
+data_queue = Queue()
 
 
 def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
@@ -32,10 +39,7 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
     return None
 
 
-# data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
-if __name__ == '__main__':
-  cap = cv2.VideoCapture(0)  # TODO configurable
-  assert cap.isOpened, "failed to open camera"
+def scan_fn(cap: cv2.VideoCapture):
   cap.set(cv2.CAP_PROP_FRAME_WIDTH, kFrameWidth)  # TODO configurable
   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, kFrameHeight)
 
@@ -77,10 +81,7 @@ if __name__ == '__main__':
     for barcode in results:
       last_seen = last_seen_times.get(barcode.text, datetime.datetime(1990, 1, 1))
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
-        decoded = Iso15434.from_data(barcode.text)
-        dist = guess_distributor(barcode, decoded)
-        print(f"{dist}: {decoded}")
-
+        data_queue.put(barcode)
         frame_thick = 4
       else:
         frame_thick = 1
@@ -97,4 +98,36 @@ if __name__ == '__main__':
     cv2.imshow(kWindowName + "b", roi)
     key = cv2.waitKey(1)  # delay
     if key == ord('q'):
-      break
+      sys.exit(0)
+
+
+def console_fn():
+  while True:
+    userline = input()
+    data_queue.put(userline)
+
+
+def csv_fn():
+  while True:
+    data = data_queue.get()
+
+    if isinstance(data, str):
+      pass
+    elif isinstance(data, zxingcpp.Result):
+      decoded = Iso15434.from_data(data.text)
+      distributor = guess_distributor(data, decoded)
+      print(f"{distributor} {decoded}")
+
+
+# data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
+if __name__ == '__main__':
+  cap = cv2.VideoCapture(0)  # TODO configurable
+  assert cap.isOpened, "failed to open camera"
+
+  scan_thread = Thread(target=scan_fn, args=(cap, ))
+  console_thread = Thread(target=console_fn)
+  csv_thread = Thread(target=csv_fn)
+
+  scan_thread.start()
+  console_thread.start()
+  csv_thread.start()
