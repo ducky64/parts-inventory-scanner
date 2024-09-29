@@ -2,6 +2,7 @@ from typing import Optional
 
 import cv2
 import zxingcpp
+import numpy as np
 import datetime
 
 from iso15434 import Iso15434
@@ -86,11 +87,9 @@ if __name__ == '__main__':
       last_seen_times[barcode.text] = frame_time
 
       pos = barcode.position
-      cv2.line(frame, zxing_pos_to_cv2(pos.top_left), zxing_pos_to_cv2(pos.top_right), (0, 255, 0), frame_thick)
-      cv2.line(frame, zxing_pos_to_cv2(pos.top_right), zxing_pos_to_cv2(pos.bottom_right), (0, 255, 0), frame_thick)
-      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_right), zxing_pos_to_cv2(pos.bottom_left), (0, 255, 0), frame_thick)
-      cv2.line(frame, zxing_pos_to_cv2(pos.bottom_left), zxing_pos_to_cv2(pos.top_left), (0, 255, 0), frame_thick)
-
+      polypts = np.array([zxing_pos_to_cv2(xy)
+                          for xy in [pos.top_left, pos.top_right, pos.bottom_right, pos.bottom_left]], np.int32)
+      cv2.polylines(frame, [polypts], isClosed=True, color=(0, 255, 0), thickness=frame_thick)
       cv2.putText(frame, f"{barcode.text}", (woff + pos.top_left.x, hoff + pos.top_left.y),
                   cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 255, 0), 1)
 
