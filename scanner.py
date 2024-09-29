@@ -114,7 +114,7 @@ def scan_fn(cap: cv2.VideoCapture):
       sys.exit(0)
 
 
-def console_fn():
+def console_fn(csvfilename: str):
   while True:
     userline = input()
     data_queue.put(userline)
@@ -142,12 +142,14 @@ if __name__ == '__main__':
   cap = cv2.VideoCapture(0)  # TODO configurable
   assert cap.isOpened, "failed to open camera"
 
-  scan_thread = Thread(target=scan_fn, args=(cap, ))
   console_thread = Thread(target=console_fn)
   csv_thread = Thread(target=csv_fn)
   beep_thread = Thread(target=beep_fn)
 
-  scan_thread.start()
   console_thread.start()
+  csv_thread.daemon = True
   csv_thread.start()
+  beep_thread.daemon = True
   beep_thread.start()
+
+  scan_fn(cap)  # becomes the main thread
