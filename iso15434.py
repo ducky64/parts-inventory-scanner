@@ -1,9 +1,9 @@
-# Implementation of the EIGP144 coding standard for barcodes for labeling electronic parts
+# Implementation of the ISO/IEC 15434 / EIGP144 coding standard for barcodes for labeling electronic parts
 # https://www.ecianow.org/assets/docs/GIPC/EIGP-114.2018%20ECIA%20Labeling%20Specification%20for%20Product%20and%20Shipment%20Identification%20in%20the%20Electronics%20Industry%20-%202D%20Barcode.pdf
 from typing import Dict, Union, Optional, Type
 
 
-class Eigp144Record:
+class Iso15434Record:
   """Abstract base class for records"""
   def __init__(self, identifier: str, raw: str):
     self.identifier = identifier
@@ -13,9 +13,9 @@ class Eigp144Record:
     return f"{self.identifier}={self.raw}"
 
 
-class Eigp144Field:
+class Iso15434Field:
   """Abstract base class for fields definitions"""
-  def __init__(self, name: str, identifier: str, ctor: Type[Eigp144Record] = Eigp144Record):
+  def __init__(self, name: str, identifier: str, ctor: Type[Iso15434Record] = Iso15434Record):
     self.name = name
     self.identifier = identifier
     self.ctor = ctor
@@ -24,25 +24,25 @@ class Eigp144Field:
     return f"{self.identifier} ({self.name})"
 
 
-FieldPo = Eigp144Field('Customer PO', 'K')
-FieldPackingListNumber = Eigp144Field('Packing List Number', '11K')
-FieldShipDate = Eigp144Field('Ship Date', '6D')
-FieldCustomerPartNumber = Eigp144Field('Customer Part Number', 'P')
-FieldSupplierPartNumber = Eigp144Field('Supplier Part Number', '1P')
-FieldCustomerPoLine = Eigp144Field('Customer PO Line', '4K')
-FieldQuantity = Eigp144Field('Quantity', 'Q')
-FieldDateCode0 = Eigp144Field('Date Code', '9D')
-FieldDateCode1 = Eigp144Field('Date Code', '10D')
-FieldLotCode = Eigp144Field('Lot Code', '1T')
-FieldCountryOfOrigin = Eigp144Field('Country of Origin', '4L')
-FieldBinCode = Eigp144Field('BIN Code', '33P')
-FieldPackageCount = Eigp144Field('Package Count', '13Q')
-FieldWeight = Eigp144Field('Weight', '7Q')
-FieldManufacturer = Eigp144Field('Manufacturer', '1V')
-FieldRohsCc = Eigp144Field('RoHS/CC', 'E')
+FieldPo = Iso15434Field('Customer PO', 'K')
+FieldPackingListNumber = Iso15434Field('Packing List Number', '11K')
+FieldShipDate = Iso15434Field('Ship Date', '6D')
+FieldCustomerPartNumber = Iso15434Field('Customer Part Number', 'P')
+FieldSupplierPartNumber = Iso15434Field('Supplier Part Number', '1P')
+FieldCustomerPoLine = Iso15434Field('Customer PO Line', '4K')
+FieldQuantity = Iso15434Field('Quantity', 'Q')
+FieldDateCode0 = Iso15434Field('Date Code', '9D')
+FieldDateCode1 = Iso15434Field('Date Code', '10D')
+FieldLotCode = Iso15434Field('Lot Code', '1T')
+FieldCountryOfOrigin = Iso15434Field('Country of Origin', '4L')
+FieldBinCode = Iso15434Field('BIN Code', '33P')
+FieldPackageCount = Iso15434Field('Package Count', '13Q')
+FieldWeight = Iso15434Field('Weight', '7Q')
+FieldManufacturer = Iso15434Field('Manufacturer', '1V')
+FieldRohsCc = Iso15434Field('RoHS/CC', 'E')
 
 
-class Eigp144:
+class Iso15434:
   kAllFields = [
     FieldPo,
     FieldPackingListNumber,
@@ -70,7 +70,7 @@ class Eigp144:
   kTrailer = kRecordSeparator + kEndOfTransmission
 
   @classmethod
-  def from_data(cls, data: str) -> Optional['Eigp144']:
+  def from_data(cls, data: str) -> Optional['Iso15434']:
     if not data.startswith(cls.kHeader):
       return None
     data = data[len(cls.kHeader):]
@@ -78,7 +78,7 @@ class Eigp144:
       data = data[:-len(cls.kTrailer)]
 
     data_elements = {}
-    for data_element in data.split(Eigp144.kGroupSeparator):
+    for data_element in data.split(Iso15434.kGroupSeparator):
       identifier = ''
       while data_element and data_element[0].isnumeric():
         identifier += data_element[0]
@@ -86,20 +86,20 @@ class Eigp144:
       identifier += data_element[0]
       data_element = data_element[1:]
 
-      if identifier in Eigp144.kFieldsByIdentifier:
-        field = Eigp144.kFieldsByIdentifier[identifier]
+      if identifier in Iso15434.kFieldsByIdentifier:
+        field = Iso15434.kFieldsByIdentifier[identifier]
         ctor = field.ctor
       else:
         field = identifier
-        ctor = Eigp144Record
+        ctor = Iso15434Record
       assert field not in data_elements, f"duplicate field {field}"
       parsed = ctor(identifier, data_element)
       data_elements[field] = parsed
 
-    return Eigp144(data_elements)
+    return Iso15434(data_elements)
 
-  def __init__(self, data: Dict[Union[Eigp144Field, str], Eigp144Record]):
+  def __init__(self, data: Dict[Union[Iso15434Field, str], Iso15434Record]):
     self.data = data
 
   def __repr__(self):
-    return f"Eigp144({self.data})"
+    return f"{self.__class__.__name__}({self.data})"
