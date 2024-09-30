@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 import cv2
@@ -8,8 +9,9 @@ import sys
 import beepy
 
 from queue import Queue
-from threading import Thread
+import json
 
+from digikey_api import DigikeyApi, DigikeyApiConfig
 from iso15434 import Iso15434
 
 kWindowName = "PartsScanner"
@@ -52,6 +54,8 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
 
 
 def scan_fn(cap: cv2.VideoCapture):
+  """Thread for scanning barcodes, enqueueing scanned barcodes
+  Handles de-duplication using a timeout between scans of the same barcode"""
   cap.set(cv2.CAP_PROP_FRAME_WIDTH, kFrameWidth)  # TODO configurable
   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, kFrameHeight)
 
@@ -115,12 +119,14 @@ def scan_fn(cap: cv2.VideoCapture):
 
 
 def console_fn(csvfilename: str):
+  """Thread that handles user input, enueueing each user-inputted line"""
   while True:
     userline = input()
     data_queue.put(userline)
 
 
 def csv_fn():
+  """'Primary' thread that mixes scanned barcodes and user input, writing data to a CSV file"""
   while True:
     data = data_queue.get()
 
@@ -139,6 +145,27 @@ def beep_fn():
 
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
+  with open('digikey_api_sandbox_config.json') as f:
+    digikey_api_config = DigikeyApiConfig.model_validate_json(f.read())
+  if os.path.exists('digikey_api_token.json'):
+    with open('digikey_api_token.json') as f:
+      token = json.load(f)
+      print("Loaded Digikey API token")
+  else:
+    token = None
+
+  digikey_api = DigikeyApi(digikey_api_config, token=token, sandbox=True)
+
+  with open('digikey_api_token.json', 'w') as f:
+    json.dump(digikey_api.token(), f)
+    print("Saved Digikey API token")
+
+  print(digikey_api.product_details("ducks"))
+  print(digikey_api.barcode("1234567"))
+  digikey_api.barcode2d("[)>␞06␝PRMCF0603FT5K10CT-ND␝1PRMCF0603FT5K10␝K␝1K58732613␝10K67192477␝11K1␝4LCN␝Q100␝11ZPICK␝12Z1943037␝13Z803900␝20Z00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+
+  sys.exit(0)
+
   cap = cv2.VideoCapture(0)  # TODO configurable
   assert cap.isOpened, "failed to open camera"
 
@@ -152,4 +179,4 @@ if __name__ == '__main__':
   beep_thread.daemon = True
   beep_thread.start()
 
-  scan_fn(cap)  # becomes the main thread
+  scan_fn(cap)  # becomes the main thread for user input because it handles the exit function
