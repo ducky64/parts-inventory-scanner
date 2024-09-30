@@ -128,7 +128,7 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
   """Guesses the distributor from barcode metadata and decoded data"""
   if barcode.format == zxingcpp.BarcodeFormat.DataMatrix:
     if '20Z' in decoded.data:
-      return 'Digikey2d'
+      return 'DigiKey2d'
     else:
       return 'Mouser2d'
   else:
@@ -170,7 +170,8 @@ def csv_fn():
         else:
           print(f"unknown command {data}")
       elif isinstance(data, zxingcpp.Result):
-        barcode_key = str(data.text.encode('utf-8'))
+        barcode_raw = data.text
+        barcode_key = str(barcode_raw.encode('utf-8'))
         if curr_dict is not None:  # commit prev line
           csvw.writerow(curr_dict)
           csvfile.flush()
@@ -189,8 +190,15 @@ def csv_fn():
           curr_dict[kCsvColPackQty] = decoded.data[FieldQuantity].raw
 
           print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
-          if distributor == 'Digikey2d':
-            pass
+          if distributor == 'DigiKey2d':
+            dk_barcode = digikey_api.barcode2d(barcode_raw)
+            dk_pn = dk_barcode.DigiKeyPartNumber
+            curr_dict[kCsvColDistBarcodeData] = dk_barcode.model_dump_json()
+            dk_product = digikey_api.product_details(dk_pn)
+            curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
+
+            curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
+            print(dk_product)
           elif distributor == 'Mouser2d':
             pass
         else:

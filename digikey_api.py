@@ -130,6 +130,8 @@ class DigiKeyApi():
         if token is None:
             self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url,
                                         auto_refresh_url=self._api_prefix + self.kOauthTokenPostfix,
+                                        auto_refresh_kwargs={'client_id': api_config.client_id,
+                                                             'client_secret': api_config.client_secret},
                                         token_updater=self.token_saver)
             authorization_url, state = self._oauth.authorization_url(self._api_prefix + self.kOauthCodePostfix)
             response = input(f"Go to {authorization_url} in your browser and paste the returned URL, e.g. https://localhost/?code=...&...: ")
@@ -140,6 +142,8 @@ class DigiKeyApi():
         else:
             self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url,
                                         auto_refresh_url=self._api_prefix + self.kOauthTokenPostfix,
+                                        auto_refresh_kwargs={'client_id': api_config.client_id,
+                                                             'client_secret': api_config.client_secret},
                                         token=token, token_updater=self.token_saver)
 
     def token_saver(self, token: Dict[str, str]):
