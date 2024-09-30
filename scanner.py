@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, TextIO
 
 import cv2
 import zxingcpp
@@ -39,17 +39,6 @@ last_seen_times = {}  # text -> time, used for scan antiduplication
 
 data_queue = Queue()
 beep_queue = Queue()
-
-
-def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
-  """Guesses the distributor from barcode metadata and decoded data"""
-  if barcode.format == zxingcpp.BarcodeFormat.DataMatrix:
-    if '20Z' in decoded.data:
-      return 'Digikey'
-    else:
-      return 'Mouser'
-  else:
-    return None
 
 
 def scan_fn(cap: cv2.VideoCapture):
@@ -117,15 +106,26 @@ def scan_fn(cap: cv2.VideoCapture):
       sys.exit(0)
 
 
-def console_fn(csvfilename: str):
+def console_fn():
   """Thread that handles user input, enueueing each user-inputted line"""
   while True:
     userline = input()
     data_queue.put(userline)
 
 
-def csv_fn():
-  """'Primary' thread that mixes scanned barcodes and user input, writing data to a CSV file"""
+def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
+  """Guesses the distributor from barcode metadata and decoded data"""
+  if barcode.format == zxingcpp.BarcodeFormat.DataMatrix:
+    if '20Z' in decoded.data:
+      return 'Digikey2d'
+    else:
+      return 'Mouser2d'
+  else:
+    return None
+
+
+def csv_fn(csvfile: TextIO):
+  """Data handling thread that mixes scanned barcodes and user input, writing data to a CSV file"""
   while True:
     data = data_queue.get()
 
@@ -145,6 +145,8 @@ def beep_fn():
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
   with open('digikey_api_config.json') as f:
+    # IMPORTANT! You will need to set up your DigiKey API access and API keys.
+    # Copy the digikey_api_config_sample.json to digikey_api_config.json and fill in the values.
     digikey_api_config = DigiKeyApiConfig.model_validate_json(f.read())
 
   digikey_api = DigiKeyApi(digikey_api_config, token_filename='digikey_api_token.json')
