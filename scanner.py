@@ -1,5 +1,7 @@
 from typing import Optional, TextIO, Dict
 
+import os
+import csv
 import cv2
 import zxingcpp
 import numpy as np
@@ -8,9 +10,10 @@ import sys
 import beepy
 
 from queue import Queue
+from threading import Thread
 
 from digikey_api import DigiKeyApi, DigiKeyApiConfig
-from iso15434 import Iso15434
+from iso15434 import Iso15434, FieldSupplierPartNumber, FieldQuantity
 
 
 # Scanner / OpenCV configurations
@@ -26,17 +29,20 @@ kBarcodeTimeoutThreshold = datetime.timedelta(seconds=4)  # after not seeing a b
 
 
 # CSV header definition
+kCsvFilename = 'parts.csv'
+
 kCsvColBarcode = 'barcode'  # entire barcode, unique, used as a key
+kCsvSymbology = 'symbology'  # barcode symbology identifier from zxing
 kCsvColSupplierPart = 'supplier_part'  # manufacturer part number
+kCsvColCurrQty = 'curr_qty'  # current quantity
 kCsvColDesc = 'desc'  # catalog description
 kCsvColPackQty = 'pack_qty'  # quantity as packed
-kCsvColModQty = 'mod_qty'  # quantity modifier from pack_qty, eg -20
 kCsvColDistBarcodeData = 'dist_barcode_data'  # entire distributor barcode data response, optional
 kCsvColDistProdData = 'dist_prod_data'  # entire distributor product data response
 kCsvColScanTime = 'scan_time'  # initial scan time
 kCsvColUpdateTime = 'update_time'  # last row updated time
-kCsvHeaders = [kCsvColBarcode, kCsvColSupplierPart, kCsvColDesc, kCsvColPackQty, kCsvColModQty, kCsvColDistBarcodeData,
-               kCsvColDistProdData, kCsvColScanTime, kCsvColUpdateTime]
+kCsvHeaders = [kCsvColBarcode, kCsvSymbology, kCsvColSupplierPart, kCsvColCurrQty, kCsvColDesc,
+               kCsvColPackQty, kCsvColDistBarcodeData, kCsvColDistProdData, kCsvColScanTime, kCsvColUpdateTime]
 
 
 # Cross-thread queues
@@ -129,17 +135,66 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
     return None
 
 
-def csv_fn(records: Dict[str, str], csvfile: TextIO):
+def csv_fn():
   """Data handling thread that mixes scanned barcodes and user input, writing data to a CSV file"""
-  while True:
-    data = data_queue.get()
+  with open(kCsvFilename, 'r', newline='') as csvfile:
+    csvr = csv.DictReader(csvfile)
+    records = {row[kCsvColBarcode]: row for row in csvr}
+    fieldnames = csvr.fieldnames
+    print(f"loaded {len(records)} rows, fieldnames {fieldnames} from existing CSV")
 
-    if isinstance(data, str):
-      pass
-    elif isinstance(data, zxingcpp.Result):
-      decoded = Iso15434.from_data(data.text)
-      distributor = guess_distributor(data, decoded)
-      print(f"{distributor} {decoded}")
+  with open(kCsvFilename, 'a', newline='') as csvfile:
+    csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
+    curr_dict: Optional[Dict[str, str]] = None  # none if no part active
+
+    while True:
+      data = data_queue.get()
+
+      if isinstance(data, str):
+        if not data and curr_dict is not None:  # return to commit line
+          csvw.writerow(curr_dict)
+          csvfile.flush()
+          records[curr_dict[kCsvColBarcode]] = curr_dict
+          curr_dict = None
+          print(f"line saved")
+        elif data.startswith('+') or data.startswith('-') or data == '0':
+          if data.startswith('+'):
+            data = data[1:]
+          try:
+            qtymod = int(data)
+            curr_qty = int(curr_dict.get(kCsvColCurrQty, curr_dict[kCsvColPackQty])) + qtymod
+            curr_dict[kCsvColCurrQty] = str(curr_qty)
+            print(f"Updated quantity to {curr_qty}")
+          except ValueError:
+            print(f"unknown quantity modifier {data}")
+        else:
+          print(f"unknown command {data}")
+      elif isinstance(data, zxingcpp.Result):
+        barcode_key = str(data.text.encode('utf-8'))
+        if curr_dict is not None:  # commit prev line
+          csvw.writerow(curr_dict)
+          csvfile.flush()
+          records[curr_dict[kCsvColBarcode]] = curr_dict
+
+        if barcode_key in records:
+          print("WARNING: duplicate row")
+
+        curr_dict = {kCsvColBarcode: barcode_key,
+                     kCsvSymbology: data.symbology_identifier}
+        if data.symbology_identifier.startswith(']d'):
+          decoded = Iso15434.from_data(data.text)
+          distributor = guess_distributor(data, decoded)
+
+          curr_dict[kCsvColSupplierPart] = decoded.data[FieldSupplierPartNumber].raw
+          curr_dict[kCsvColPackQty] = decoded.data[FieldQuantity].raw
+
+          print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
+          if distributor == 'Digikey2d':
+            pass
+          elif distributor == 'Mouser2d':
+            pass
+        else:
+          print(f"unknown symbology {data.symbology_identifier} {data.text}")
 
 
 def beep_fn():
@@ -149,6 +204,7 @@ def beep_fn():
 
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
+  # initialize Digikey API
   with open('digikey_api_config.json') as f:
     # IMPORTANT! You will need to set up your DigiKey API access and API keys.
     # Copy the digikey_api_config_sample.json to digikey_api_config.json and fill in the values.
@@ -156,12 +212,15 @@ if __name__ == '__main__':
 
   digikey_api = DigiKeyApi(digikey_api_config, token_filename='digikey_api_token.json')
 
-  # print(digikey_api.product_details("ducks"))
-  # print(digikey_api.barcode("1234567"))
-  print(digikey_api.barcode2d("[)>␞06␝PRMCF0603FT5K10CT-ND␝1PRMCF0603FT5K10␝K␝1K58732613␝10K67192477␝11K1␝4LCN␝Q100␝11ZPICK␝12Z1943037␝13Z803900␝20Z00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+  # initialize output file
+  # TODO: validate fieldnames
+  if not os.path.exists(kCsvFilename):
+    print(f"creating new csv {kCsvFilename}")
+    with open(kCsvFilename, 'w', newline='') as csvfile:
+      csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
+      csvw.writeheader()
 
-  sys.exit(0)
-
+  # initialize OpenCV
   cap = cv2.VideoCapture(0)  # TODO configurable
   assert cap.isOpened, "failed to open camera"
 

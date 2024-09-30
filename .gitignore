@@ -164,3 +164,5 @@ cython_debug/
 digikey_api_config.json
 digikey_api_sandbox_config.json
 digikey_api_token.json
+
+parts.csv
