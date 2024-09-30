@@ -1,4 +1,3 @@
-import os
 from typing import Optional
 
 import cv2
@@ -9,7 +8,6 @@ import sys
 import beepy
 
 from queue import Queue
-import json
 
 from digikey_api import DigikeyApi, DigikeyApiConfig
 from iso15434 import Iso15434
@@ -147,18 +145,8 @@ def beep_fn():
 if __name__ == '__main__':
   with open('digikey_api_sandbox_config.json') as f:
     digikey_api_config = DigikeyApiConfig.model_validate_json(f.read())
-  if os.path.exists('digikey_api_token.json'):
-    with open('digikey_api_token.json') as f:
-      token = json.load(f)
-      print("Loaded Digikey API token")
-  else:
-    token = None
 
-  digikey_api = DigikeyApi(digikey_api_config, token=token, sandbox=True)
-
-  with open('digikey_api_token.json', 'w') as f:
-    json.dump(digikey_api.token(), f)
-    print("Saved Digikey API token")
+  digikey_api = DigikeyApi(digikey_api_config, token_filename='digikey_api_token.json', sandbox=True)
 
   print(digikey_api.product_details("ducks"))
   print(digikey_api.barcode("1234567"))

@@ -1,6 +1,8 @@
+import json
+import os
 from typing import Dict, Optional, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from requests_oauthlib import OAuth2Session
 
 
@@ -44,22 +46,24 @@ class CategoryNode(BaseModel):
 
 
 class Product(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     Description: Description
     Manufacturer: Manufacturer
     ManufacturerProductNumber: str
     UnitPrice: float  # in single quantity
-    ProductUrl: str
-    DatasheetUrl: str
-    PhotoUrl: str
+    ProductUrl: Optional[str] = None
+    DatasheetUrl: Optional[str] = None
+    PhotoUrl: Optional[str] = None
     # ProductVariations
     QuantityAvailable: int
     # ProductStatus
-    BackOrderNotAllowed: bool
-    NormallyStocking: bool
-    Discontinued: bool
-    EndOfLife: bool
-    Ncnr: bool  # non-cancellable, non-returnable
-    PrimaryVideoUrl: str
+    BackOrderNotAllowed: Optional[bool] = None
+    NormallyStocking: Optional[bool] = None
+    Discontinued: Optional[bool] = None
+    EndOfLife: Optional[bool] = None
+    Ncnr: Optional[bool] = None  # non-cancellable, non-returnable
+    PrimaryVideoUrl: Optional[str] = None
     # Parameters
     # BaseProductNumber
     Category: CategoryNode
@@ -67,7 +71,7 @@ class Product(BaseModel):
     ManufacturerLeadWeeks: str
     ManufacturerPublicQuantity: int
     # Series
-    ShippingInfo: str  # additionally shipping information, if available
+    ShippingInfo: Optional[str] = None
     # Classifications
 
 
@@ -105,7 +109,7 @@ class DigikeyApi():
     kOauthCodePostfix = 'v1/oauth2/authorize'
     kOauthTokenPostfix = 'v1/oauth2/token'
 
-    def __init__(self, api_config: DigikeyApiConfig, token: Optional[Dict[str, str]] = None, sandbox: bool = False,
+    def __init__(self, api_config: DigikeyApiConfig, token_filename: Optional[str] = None, sandbox: bool = False,
                  locale_language='en', locale_site='US'):
         self._locale_language = locale_language
         self._locale_site = locale_site
@@ -115,20 +119,31 @@ class DigikeyApi():
         else:
             self._api_prefix = "https://api.digikey.com/"
 
-        if token is None:
-            self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url)
-            authorization_url, state = self._oauth.authorization_url(self._api_prefix + self.kOauthCodePostfix)
-            response = input(f"Go to {authorization_url} in your browser and paste the returned URL, e.g. https://localhost/?code=...&...")
-            self._token = self._oauth.fetch_token(self._api_prefix + self.kOauthTokenPostfix, authorization_response=response,
-                                                  include_client_id=True,  # otherwise Digikey rejects the request
-                                                  client_secret=api_config.client_secret)
+        self._token_filename = token_filename
+        if os.path.exists(self._token_filename):
+            with open(self._token_filename) as f:
+                token = json.load(f)
         else:
-            self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url, token=token)
-            self._token = self._oauth.token
+            token = None
 
-    def token(self) -> Dict[str, str]:
-        """Returns the token as a dict, e.g. to save for a future run"""
-        return self._token
+        if token is None:
+            self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url,
+                                        auto_refresh_url=self._api_prefix + self.kOauthTokenPostfix,
+                                        token_updater=self.token_saver)
+            authorization_url, state = self._oauth.authorization_url(self._api_prefix + self.kOauthCodePostfix)
+            response = input(f"Go to {authorization_url} in your browser and paste the returned URL, e.g. https://localhost/?code=...&...: ")
+            token = self._oauth.fetch_token(self._api_prefix + self.kOauthTokenPostfix, authorization_response=response,
+                                            include_client_id=True,  # otherwise Digikey rejects the request
+                                            client_secret=api_config.client_secret)
+            self.token_saver(token)
+        else:
+            self._oauth = OAuth2Session(api_config.client_id, redirect_uri=api_config.redirect_url,
+                                        auto_refresh_url=self._api_prefix + self.kOauthTokenPostfix,
+                                        token=token, token_updater=self.token_saver)
+
+    def token_saver(self, token: Dict[str, str]):
+        with open(self._token_filename, 'w') as f:
+            json.dump(token, f)
 
     def barcode2d(self, barcode: str) -> Product2dBarcodeResponse:
         """Product 2d barcode API, taking in the raw scanned barcode. Escape character encoding handled internally."""
@@ -147,9 +162,10 @@ class DigikeyApi():
 
     def product_details(self, product_number: str) -> ProductDetails:
         """Product details API, taking in a manufacture or DigiKey part number."""
-        response = self._oauth.get(self._api_prefix + f"products/v4/product/search/{product_number}/productdetails",
+        response = self._oauth.get(self._api_prefix + f"products/v4/search/{product_number}/productdetails",
                                    headers={'X-DIGIKEY-Client-Id': self._oauth.client_id,
                                             'X-DIGIKEY-Locale-Language': self._locale_language,
                                             'X-DIGIKEY-Locale-Site': self._locale_site})
         assert response.status_code == 200, f"error response {response}: {response.text}"
+        print(response.text)
         return ProductDetails.model_validate_json(response.text)
