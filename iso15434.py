@@ -83,6 +83,8 @@ class Iso15434:
       while data_element and data_element[0].isnumeric():
         identifier += data_element[0]
         data_element = data_element[1:]
+      if not data_element:
+        continue
       identifier += data_element[0]
       data_element = data_element[1:]
 

@@ -20,8 +20,8 @@ from iso15434 import Iso15434, FieldSupplierPartNumber, FieldQuantity
 kWindowName = "PartsScanner"
 kFrameWidth = 1920
 kFrameHeight = 1080
-kRoiWidth = 280  # center-aligned region-of-interest - speeds up scanning
-kRoiHeight = 280
+kRoiWidth = 240  # center-aligned region-of-interest - speeds up scanning
+kRoiHeight = 240
 
 kFontScale = 0.5
 
@@ -55,6 +55,11 @@ def scan_fn(cap: cv2.VideoCapture):
   """Thread for scanning barcodes, enqueueing scanned barcodes
   Handles de-duplication using a timeout between scans of the same barcode"""
   last_seen_times = {}  # text -> time, used for scan antiduplication
+  kFormats = [
+    zxingcpp.BarcodeFormat.DataMatrix,
+    zxingcpp.BarcodeFormat.Code128
+  ]
+  format = zxingcpp.BarcodeFormat.DataMatrix
 
   cap.set(cv2.CAP_PROP_FRAME_WIDTH, kFrameWidth)  # TODO configurable
   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, kFrameHeight)
@@ -71,9 +76,10 @@ def scan_fn(cap: cv2.VideoCapture):
           w//2 - kRoiWidth//2 : w//2 + kRoiWidth//2]
     roi = cv2.fastNlMeansDenoisingColored(roi, None, 10, 10, 7, 21)
     roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
-    roi = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 17, 2)
+    roi = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+    # roi = cv2.threshold(roi, 63, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     # roi = cv2.multiply(roi, roi_msk)
-    results = zxingcpp.read_barcodes(roi, formats=zxingcpp.BarcodeFormat.DataMatrix)
+    results = zxingcpp.read_barcodes(roi, formats=format)
 
     # display for user
     # analysis ROI display
@@ -81,7 +87,8 @@ def scan_fn(cap: cv2.VideoCapture):
                   (w//2 + kRoiWidth//2, h//2 + kRoiHeight//2),
                   (255, 0, 0), 1)
     # reticule
-    cv2.putText(frame, f"{w}x{h} {ticks}", (0, 32), cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 0, 255), 1)
+    cv2.putText(frame, f"{w}x{h} {ticks}", (0, 16), cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 0, 255), 1)
+    cv2.putText(frame, f"{format}", (0, 32), cv2.FONT_HERSHEY_SIMPLEX, kFontScale, (0, 0, 255), 1)
     cv2.line(frame, (w//2, h//2 - kRoiHeight//2), (w//2, h//2 + kRoiHeight//2), (0, 0, 255), 1)
     cv2.line(frame, (w//2 - kRoiWidth//2, h//2), (w//2 + kRoiWidth//2, h//2), (0, 0, 255), 1)
 
@@ -97,6 +104,7 @@ def scan_fn(cap: cv2.VideoCapture):
     for barcode in results:
       last_seen = last_seen_times.get(barcode.text, datetime.datetime(1990, 1, 1))
       if frame_time - last_seen > kBarcodeTimeoutThreshold:
+        print(f"{barcode.symbology_identifier}: {barcode.text}")
         beep_queue.put(1)
         data_queue.put(barcode)
         frame_thick = 4
@@ -116,6 +124,8 @@ def scan_fn(cap: cv2.VideoCapture):
     key = cv2.waitKey(1)  # delay
     if key == ord('q'):
       sys.exit(0)
+    elif key == ord('f'):
+      format = kFormats[(kFormats.index(format) + 1) % len(kFormats)]
 
 
 def console_fn():
@@ -138,13 +148,13 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
 
 def csv_fn():
   """Data handling thread that mixes scanned barcodes and user input, writing data to a CSV file"""
-  with open(kCsvFilename, 'r', newline='') as csvfile:
+  with open(kCsvFilename, 'r', newline='', encoding='utf-8') as csvfile:
     csvr = csv.DictReader(csvfile)
     records = {row[kCsvColBarcode]: row for row in csvr}
     fieldnames = csvr.fieldnames
     print(f"loaded {len(records)} rows, fieldnames {fieldnames} from existing CSV")
 
-  with open(kCsvFilename, 'a', newline='') as csvfile:
+  with open(kCsvFilename, 'a', newline='', encoding='utf-8') as csvfile:
     csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
     curr_dict: Optional[Dict[str, str]] = None  # none if no part active
 
@@ -158,6 +168,9 @@ def csv_fn():
           records[curr_dict[kCsvColBarcode]] = curr_dict
           curr_dict = None
           print(f"line saved")
+        elif data.startswith('d') and curr_dict is not None:
+          curr_dict = None
+          print(f"line deleted")
         elif data.startswith('+') or data.startswith('-') or data == '0':
           if data.startswith('+'):
             data = data[1:]
@@ -168,6 +181,16 @@ def csv_fn():
             print(f"Updated quantity to {curr_qty}")
           except ValueError:
             print(f"unknown quantity modifier {data}")
+        elif data.startswith('p') and curr_dict is not None:
+          data = data[1:]
+          try:
+            dk_product = digikey_api.product_details(data)
+            curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
+            curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
+            curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
+            print(f"{[kCsvColDesc]}, {curr_dict[kCsvColCategory]}")
+          except AssertionError as e:
+            print(f"WARNING: product lookup failed, fields not modified: {e}")
         else:
           print(f"unknown command {data}")
       elif isinstance(data, zxingcpp.Result):
@@ -194,21 +217,41 @@ def csv_fn():
           print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
           if distributor == 'DigiKey2d':
             try:
-              dk_barcode = digikey_api.barcode2d(barcode_raw)
-              dk_pn = dk_barcode.DigiKeyPartNumber
-              curr_dict[kCsvColDistBarcodeData] = dk_barcode.model_dump_json()
-            except AssertionError:
-              print("WARNING: barcode lookup failed")
-              dk_pn = curr_dict[kCsvColSupplierPart]
+              dk_barcode2d = digikey_api.barcode2d(barcode_raw)
+              dk_searchterm = dk_barcode2d.DigiKeyPartNumber
+              curr_dict[kCsvColDistBarcodeData] = dk_barcode2d.model_dump_json()
+            except AssertionError as e:
+              print(f"WARNING: barcode lookup failed: {e}")
+              dk_searchterm = curr_dict[kCsvColSupplierPart]
+          elif distributor == 'Mouser2d':
+            dk_searchterm = curr_dict[kCsvColSupplierPart]
 
-            dk_product = digikey_api.product_details(dk_pn)
+          try:
+            dk_product = digikey_api.product_details(dk_searchterm)
             curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
-
             curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
             curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
+            print(f"{curr_dict[kCsvColDesc]}, {curr_dict[kCsvColCategory]}")
+          except AssertionError as e:
+            print(f"WARNING: product lookup failed, fields not populated: {e}")
 
-          elif distributor == 'Mouser2d':
-            pass
+        elif data.symbology_identifier.startswith(']C'):
+          try:
+            dk_barcode1d = digikey_api.barcode(barcode_raw)
+            dk_searchterm = dk_barcode1d.DigiKeyPartNumber
+            curr_dict[kCsvColDistBarcodeData] = dk_barcode1d.model_dump_json()
+            curr_dict[kCsvColSupplierPart] = dk_barcode1d.ManufacturerPartNumber
+            curr_dict[kCsvColPackQty] = dk_barcode1d.Quantity
+
+            dk_product = digikey_api.product_details(dk_searchterm)
+            curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
+            curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
+            curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
+            print(f"Digikey1d {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
+            print(f"{curr_dict[kCsvColDesc]}, {curr_dict[kCsvColCategory]}")
+          except AssertionError as e:
+            print(f"WARNING: product lookup failed, fields not populated: {e}")
+
         else:
           print(f"unknown symbology {data.symbology_identifier} {data.text}")
 
