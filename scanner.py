@@ -1,4 +1,4 @@
-from typing import Optional, TextIO
+from typing import Optional, TextIO, Dict
 
 import cv2
 import zxingcpp
@@ -12,31 +12,34 @@ from queue import Queue
 from digikey_api import DigiKeyApi, DigiKeyApiConfig
 from iso15434 import Iso15434
 
+
+# Scanner / OpenCV configurations
 kWindowName = "PartsScanner"
 kFrameWidth = 1920
 kFrameHeight = 1080
-
-kFontScale = 0.5
-
 kRoiWidth = 280  # center-aligned region-of-interest - speeds up scanning
 kRoiHeight = 280
 
+kFontScale = 0.5
+
 kBarcodeTimeoutThreshold = datetime.timedelta(seconds=4)  # after not seeing a barcode for this long, count as a new one
 
-kCsvHeaders = ['barcode',  # entire barcode, unique, used as a key
-               'supplier_part',  # manufacturer part number
-               'desc',  # catalog description
-               'pack_qty',  # quantity as packed
-               'mod_qty',  # quantity modifier from pack_qty, eg -20
-               'dist_barcode_data',  # entire distributor barcode data response, optional
-               'dist_prod_data',  # entire distributor product data response
-               'scan_time',  # initial scan time
-               'update_time'  # last row updated time
-               ]
 
-last_seen_times = {}  # text -> time, used for scan antiduplication
+# CSV header definition
+kCsvColBarcode = 'barcode'  # entire barcode, unique, used as a key
+kCsvColSupplierPart = 'supplier_part'  # manufacturer part number
+kCsvColDesc = 'desc'  # catalog description
+kCsvColPackQty = 'pack_qty'  # quantity as packed
+kCsvColModQty = 'mod_qty'  # quantity modifier from pack_qty, eg -20
+kCsvColDistBarcodeData = 'dist_barcode_data'  # entire distributor barcode data response, optional
+kCsvColDistProdData = 'dist_prod_data'  # entire distributor product data response
+kCsvColScanTime = 'scan_time'  # initial scan time
+kCsvColUpdateTime = 'update_time'  # last row updated time
+kCsvHeaders = [kCsvColBarcode, kCsvColSupplierPart, kCsvColDesc, kCsvColPackQty, kCsvColModQty, kCsvColDistBarcodeData,
+               kCsvColDistProdData, kCsvColScanTime, kCsvColUpdateTime]
 
 
+# Cross-thread queues
 data_queue = Queue()
 beep_queue = Queue()
 
@@ -44,6 +47,8 @@ beep_queue = Queue()
 def scan_fn(cap: cv2.VideoCapture):
   """Thread for scanning barcodes, enqueueing scanned barcodes
   Handles de-duplication using a timeout between scans of the same barcode"""
+  last_seen_times = {}  # text -> time, used for scan antiduplication
+
   cap.set(cv2.CAP_PROP_FRAME_WIDTH, kFrameWidth)  # TODO configurable
   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, kFrameHeight)
 
@@ -124,7 +129,7 @@ def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
     return None
 
 
-def csv_fn(csvfile: TextIO):
+def csv_fn(records: Dict[str, str], csvfile: TextIO):
   """Data handling thread that mixes scanned barcodes and user input, writing data to a CSV file"""
   while True:
     data = data_queue.get()
