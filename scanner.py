@@ -9,7 +9,7 @@ import beepy
 
 from queue import Queue
 
-from digikey_api import DigikeyApi, DigikeyApiConfig
+from digikey_api import DigiKeyApi, DigiKeyApiConfig
 from iso15434 import Iso15434
 
 kWindowName = "PartsScanner"
@@ -28,7 +28,8 @@ kCsvHeaders = ['barcode',  # entire barcode, unique, used as a key
                'desc',  # catalog description
                'pack_qty',  # quantity as packed
                'mod_qty',  # quantity modifier from pack_qty, eg -20
-               'dist_data',  # entire distributor data response
+               'dist_barcode_data',  # entire distributor barcode data response, optional
+               'dist_prod_data',  # entire distributor product data response
                'scan_time',  # initial scan time
                'update_time'  # last row updated time
                ]
@@ -143,14 +144,14 @@ def beep_fn():
 
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
-  with open('digikey_api_sandbox_config.json') as f:
-    digikey_api_config = DigikeyApiConfig.model_validate_json(f.read())
+  with open('digikey_api_config.json') as f:
+    digikey_api_config = DigiKeyApiConfig.model_validate_json(f.read())
 
-  digikey_api = DigikeyApi(digikey_api_config, token_filename='digikey_api_token.json', sandbox=True)
+  digikey_api = DigiKeyApi(digikey_api_config, token_filename='digikey_api_token.json')
 
-  print(digikey_api.product_details("ducks"))
-  print(digikey_api.barcode("1234567"))
-  digikey_api.barcode2d("[)>␞06␝PRMCF0603FT5K10CT-ND␝1PRMCF0603FT5K10␝K␝1K58732613␝10K67192477␝11K1␝4LCN␝Q100␝11ZPICK␝12Z1943037␝13Z803900␝20Z00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+  # print(digikey_api.product_details("ducks"))
+  # print(digikey_api.barcode("1234567"))
+  print(digikey_api.barcode2d("[)>␞06␝PRMCF0603FT5K10CT-ND␝1PRMCF0603FT5K10␝K␝1K58732613␝10K67192477␝11K1␝4LCN␝Q100␝11ZPICK␝12Z1943037␝13Z803900␝20Z00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
 
   sys.exit(0)
 

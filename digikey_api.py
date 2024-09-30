@@ -6,18 +6,19 @@ from pydantic import BaseModel, ConfigDict
 from requests_oauthlib import OAuth2Session
 
 
-import logging
-import sys
-log = logging.getLogger('requests_oauthlib')
-log.addHandler(logging.StreamHandler(sys.stdout))
-log.setLevel(logging.DEBUG)
+# import logging
+# import sys
+# log = logging.getLogger('requests_oauthlib')
+# log.addHandler(logging.StreamHandler(sys.stdout))
+# log.setLevel(logging.DEBUG)
 
 
-# Digikey API implementation for Python, using Pydantic for deserialization
+# DigiKey API implementation for Python, using Pydantic for deserialization
 # examples from https://medium.com/@flaviohenriquepereiraoliveira/how-to-use-digikey-api-for-product-detail-c7d262cad14
 # and https://requests-oauthlib.readthedocs.io/en/latest/oauth2_workflow.html
 
-class DigikeyApiConfig(BaseModel):
+
+class DigiKeyApiConfig(BaseModel):
     client_id: str
     client_secret: str
     redirect_url: str = "https://localhost"
@@ -99,17 +100,17 @@ class Product2dBarcodeResponse(BaseModel):
     InvoiceId: int
     PurchaseOrder: str
     CountryOfOrigin: str
-    LotCode: str
-    DateCode: str
+    LotCode: Optional[str] = None
+    DateCode: Optional[str] = None
 
 
-class DigikeyApi():
-    """Digikey API implementation, initializing Oauth2 in the constructor.
+class DigiKeyApi():
+    """DigiKey API implementation, initializing Oauth2 in the constructor.
     Optionally pass in a saved token to skip the Oauth2 flow."""
     kOauthCodePostfix = 'v1/oauth2/authorize'
     kOauthTokenPostfix = 'v1/oauth2/token'
 
-    def __init__(self, api_config: DigikeyApiConfig, token_filename: Optional[str] = None, sandbox: bool = False,
+    def __init__(self, api_config: DigiKeyApiConfig, token_filename: Optional[str] = None, sandbox: bool = False,
                  locale_language='en', locale_site='US'):
         self._locale_language = locale_language
         self._locale_site = locale_site
@@ -146,16 +147,15 @@ class DigikeyApi():
             json.dump(token, f)
 
     def barcode2d(self, barcode: str) -> Product2dBarcodeResponse:
-        """Product 2d barcode API, taking in the raw scanned barcode. Escape character encoding handled internally."""
-        barcode_encoded = barcode.encode('unicode_escape').decode('ascii')
-        response = self._oauth.get(self._api_prefix + f"Barcoding/v3/ProductBarcodes/{barcode_encoded}",
+        """Product 2d barcode API, taking in the raw scanned barcode with original (un-escaped) special symbols."""
+        response = self._oauth.get(self._api_prefix + f"Barcoding/v3/Product2DBarcodes/{barcode}",
                                    headers={'X-DIGIKEY-Client-Id': self._oauth.client_id})
         assert response.status_code == 200, f"error response {response}: {response.text}"
         return Product2dBarcodeResponse.model_validate_json(response.text)
 
     def barcode(self, barcode: str) -> ProductBarcodeResponse:
         """Product (1d / linear) barcode API, taking in the raw scanned barcode."""
-        response = self._oauth.get(self._api_prefix + f'Barcoding/v3/Product2DBarcodes/{barcode}',
+        response = self._oauth.get(self._api_prefix + f'Barcoding/v3/ProductBarcodes/{barcode}',
                                    headers={'X-DIGIKEY-Client-Id': self._oauth.client_id})
         assert response.status_code == 200, f"error response {response}: {response.text}"
         return ProductBarcodeResponse.model_validate_json(response.text)
