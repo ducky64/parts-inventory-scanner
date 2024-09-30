@@ -33,6 +33,7 @@ kCsvFilename = 'parts.csv'
 
 kCsvColBarcode = 'barcode'  # entire barcode, unique, used as a key
 kCsvSymbology = 'symbology'  # barcode symbology identifier from zxing
+kCsvColCategory = 'category'  # part category
 kCsvColSupplierPart = 'supplier_part'  # manufacturer part number
 kCsvColCurrQty = 'curr_qty'  # current quantity
 kCsvColDesc = 'desc'  # catalog description
@@ -41,7 +42,7 @@ kCsvColDistBarcodeData = 'dist_barcode_data'  # entire distributor barcode data 
 kCsvColDistProdData = 'dist_prod_data'  # entire distributor product data response
 kCsvColScanTime = 'scan_time'  # initial scan time
 kCsvColUpdateTime = 'update_time'  # last row updated time
-kCsvHeaders = [kCsvColBarcode, kCsvSymbology, kCsvColSupplierPart, kCsvColCurrQty, kCsvColDesc,
+kCsvHeaders = [kCsvColBarcode, kCsvSymbology, kCsvColCategory, kCsvColSupplierPart, kCsvColCurrQty, kCsvColDesc,
                kCsvColPackQty, kCsvColDistBarcodeData, kCsvColDistProdData, kCsvColScanTime, kCsvColUpdateTime]
 
 
@@ -171,7 +172,7 @@ def csv_fn():
           print(f"unknown command {data}")
       elif isinstance(data, zxingcpp.Result):
         barcode_raw = data.text
-        barcode_key = str(barcode_raw.encode('utf-8'))
+        barcode_key = str(barcode_raw.encode('unicode_escape').decode('ascii'))
         if curr_dict is not None:  # commit prev line
           csvw.writerow(curr_dict)
           csvfile.flush()
@@ -181,7 +182,8 @@ def csv_fn():
           print("WARNING: duplicate row")
 
         curr_dict = {kCsvColBarcode: barcode_key,
-                     kCsvSymbology: data.symbology_identifier}
+                     kCsvSymbology: data.symbology_identifier,
+                     kCsvColScanTime: datetime.datetime.now().isoformat()}
         if data.symbology_identifier.startswith(']d'):
           decoded = Iso15434.from_data(data.text)
           distributor = guess_distributor(data, decoded)
@@ -193,12 +195,18 @@ def csv_fn():
           if distributor == 'DigiKey2d':
             dk_barcode = digikey_api.barcode2d(barcode_raw)
             dk_pn = dk_barcode.DigiKeyPartNumber
-            curr_dict[kCsvColDistBarcodeData] = dk_barcode.model_dump_json()
-            dk_product = digikey_api.product_details(dk_pn)
+            try:
+              curr_dict[kCsvColDistBarcodeData] = dk_barcode.model_dump_json()
+              dk_product = digikey_api.product_details(dk_pn)
+            except AssertionError:
+              print("WARNING: barcode lookup failed")
+              dk_product = curr_dict[kCsvColSupplierPart]
+
             curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
 
             curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
-            print(dk_product)
+            curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
+
           elif distributor == 'Mouser2d':
             pass
         else:

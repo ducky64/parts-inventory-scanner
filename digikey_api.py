@@ -43,7 +43,14 @@ class CategoryNode(BaseModel):
     NewProductCount: int
     ImageUrl: str
     SeoDescription: str
-    # ChildCategories
+    ChildCategories: List['CategoryNode']
+
+    def simple_str(self) -> str:
+        if self.ChildCategories:
+            assert len(self.ChildCategories) == 1
+            return f"{self.Name} - {self.ChildCategories[0].simple_str()}"
+        else:
+            return self.Name
 
 
 class Product(BaseModel):
@@ -171,5 +178,4 @@ class DigiKeyApi():
                                             'X-DIGIKEY-Locale-Language': self._locale_language,
                                             'X-DIGIKEY-Locale-Site': self._locale_site})
         assert response.status_code == 200, f"error response {response}: {response.text}"
-        print(response.text)
         return ProductDetails.model_validate_json(response.text)
