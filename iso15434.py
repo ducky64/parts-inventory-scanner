@@ -7,7 +7,7 @@ class Iso15434Record:
   """Abstract base class for records"""
   def __init__(self, identifier: str, raw: str):
     self.identifier = identifier
-    self.raw = raw
+    self.raw = raw.replace('\u2420', ' ')
 
   def __repr__(self):
     return f"{self.identifier}={self.raw}"

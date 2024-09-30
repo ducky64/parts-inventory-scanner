@@ -71,7 +71,7 @@ def scan_fn(cap: cv2.VideoCapture):
           w//2 - kRoiWidth//2 : w//2 + kRoiWidth//2]
     roi = cv2.fastNlMeansDenoisingColored(roi, None, 10, 10, 7, 21)
     roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
-    roi = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    roi = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 17, 2)
     # roi = cv2.multiply(roi, roi_msk)
     results = zxingcpp.read_barcodes(roi, formats=zxingcpp.BarcodeFormat.DataMatrix)
 
@@ -193,15 +193,15 @@ def csv_fn():
 
           print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
           if distributor == 'DigiKey2d':
-            dk_barcode = digikey_api.barcode2d(barcode_raw)
-            dk_pn = dk_barcode.DigiKeyPartNumber
             try:
+              dk_barcode = digikey_api.barcode2d(barcode_raw)
+              dk_pn = dk_barcode.DigiKeyPartNumber
               curr_dict[kCsvColDistBarcodeData] = dk_barcode.model_dump_json()
-              dk_product = digikey_api.product_details(dk_pn)
             except AssertionError:
               print("WARNING: barcode lookup failed")
-              dk_product = curr_dict[kCsvColSupplierPart]
+              dk_pn = curr_dict[kCsvColSupplierPart]
 
+            dk_product = digikey_api.product_details(dk_pn)
             curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
 
             curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription

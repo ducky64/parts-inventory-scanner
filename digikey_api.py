@@ -159,6 +159,7 @@ class DigiKeyApi():
 
     def barcode2d(self, barcode: str) -> Product2dBarcodeResponse:
         """Product 2d barcode API, taking in the raw scanned barcode with original (un-escaped) special symbols."""
+        barcode = barcode.replace('/', '%2F')
         response = self._oauth.get(self._api_prefix + f"Barcoding/v3/Product2DBarcodes/{barcode}",
                                    headers={'X-DIGIKEY-Client-Id': self._oauth.client_id})
         assert response.status_code == 200, f"error response {response}: {response.text}"
@@ -173,6 +174,7 @@ class DigiKeyApi():
 
     def product_details(self, product_number: str) -> ProductDetails:
         """Product details API, taking in a manufacture or DigiKey part number."""
+        product_number = product_number.replace('/', '%2F')
         response = self._oauth.get(self._api_prefix + f"products/v4/search/{product_number}/productdetails",
                                    headers={'X-DIGIKEY-Client-Id': self._oauth.client_id,
                                             'X-DIGIKEY-Locale-Language': self._locale_language,
