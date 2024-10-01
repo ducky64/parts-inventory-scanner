@@ -20,8 +20,8 @@ from iso15434 import Iso15434, FieldSupplierPartNumber, FieldQuantity
 kWindowName = "PartsScanner"
 kFrameWidth = 1920
 kFrameHeight = 1080
-kRoiWidth = 240  # center-aligned region-of-interest - speeds up scanning
-kRoiHeight = 240
+kRoiWidth = 280  # center-aligned region-of-interest - speeds up scanning
+kRoiHeight = kRoiWidth
 
 kFontScale = 0.5
 
