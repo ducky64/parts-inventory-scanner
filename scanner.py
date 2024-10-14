@@ -36,7 +36,7 @@ kCsvSymbology = 'symbology'  # barcode symbology identifier from zxing
 kCsvColCategory = 'category'  # part category
 kCsvColSupplierPart = 'supplier_part'  # manufacturer part number
 kCsvColCurrQty = 'curr_qty'  # current quantity
-kCsvColDesc = 'desc'  # catalog description
+kCsvColDesc = 'supplier_desc'  # catalog description
 kCsvColPackQty = 'pack_qty'  # quantity as packed
 kCsvColDistBarcodeData = 'dist_barcode_data'  # entire distributor barcode data response, optional
 kCsvColDistProdData = 'dist_prod_data'  # entire distributor product data response
@@ -144,7 +144,7 @@ def csv_fn(csv_filename: str):
     print(f"loaded {len(records)} rows, fieldnames {fieldnames} from existing CSV")
 
   with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
-    csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
+    csvw = csv.DictWriter(csvfile, fieldnames=fieldnames)
     curr_dict: Optional[Dict[str, str]] = None  # none if no part active
 
     def write_line():
