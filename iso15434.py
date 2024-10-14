@@ -71,6 +71,9 @@ class Iso15434:
 
   @classmethod
   def from_data(cls, data: str) -> Optional['Iso15434']:
+    # canonicalize the separator special characters
+    data = data.replace('\x1e', '\u241e').replace('\x1d', '\u241d').replace('\x04', '\u2404')
+
     if not data.startswith(cls.kHeader):
       return None
     data = data[len(cls.kHeader):]

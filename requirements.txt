@@ -3,3 +3,4 @@ zxing-cpp
 beepy
 pydantic
 requests-oauthlib
+pyserial

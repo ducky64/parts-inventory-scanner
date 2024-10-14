@@ -1,5 +1,6 @@
-from typing import Optional, TextIO, Dict
+from typing import Optional, Dict
 
+import argparse
 import os
 import csv
 import cv2
@@ -8,6 +9,7 @@ import numpy as np
 import datetime
 import sys
 import beepy
+import serial
 
 from queue import Queue
 from threading import Thread
@@ -29,8 +31,6 @@ kBarcodeTimeoutThreshold = datetime.timedelta(seconds=4)  # after not seeing a b
 
 
 # CSV header definition
-kCsvFilename = 'parts.csv'
-
 kCsvColBarcode = 'barcode'  # entire barcode, unique, used as a key
 kCsvSymbology = 'symbology'  # barcode symbology identifier from zxing
 kCsvColCategory = 'category'  # part category
@@ -135,37 +135,61 @@ def console_fn():
     data_queue.put(userline)
 
 
-def guess_distributor(barcode, decoded: Iso15434) -> Optional[str]:
-  """Guesses the distributor from barcode metadata and decoded data"""
-  if barcode.format == zxingcpp.BarcodeFormat.DataMatrix:
-    if '20Z' in decoded.data:
-      return 'DigiKey2d'
-    else:
-      return 'Mouser2d'
-  else:
-    return None
-
-
-def csv_fn():
+def csv_fn(csv_filename: str):
   """Data handling thread that mixes scanned barcodes and user input, writing data to a CSV file"""
-  with open(kCsvFilename, 'r', newline='', encoding='utf-8') as csvfile:
+  with open(csv_filename, 'r', newline='', encoding='utf-8') as csvfile:
     csvr = csv.DictReader(csvfile)
     records = {row[kCsvColBarcode]: row for row in csvr}
     fieldnames = csvr.fieldnames
     print(f"loaded {len(records)} rows, fieldnames {fieldnames} from existing CSV")
 
-  with open(kCsvFilename, 'a', newline='', encoding='utf-8') as csvfile:
+  with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
     csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
     curr_dict: Optional[Dict[str, str]] = None  # none if no part active
+
+    def write_line():
+      if curr_dict is not None:  # commit prev line
+        csvw.writerow(curr_dict)
+        csvfile.flush()
+        records[curr_dict[kCsvColBarcode]] = curr_dict
+
+    def process_iso15434(barcode_raw: str, decoded: Iso15434, curr_dict: Dict[str, str]):
+      if '20Z' in decoded.data:
+        distributor = 'DigiKey2d'
+      else:
+        distributor = 'Mouser2d'
+
+      curr_dict[kCsvColSupplierPart] = decoded.data[FieldSupplierPartNumber].raw
+      curr_dict[kCsvColPackQty] = decoded.data[FieldQuantity].raw
+
+      print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
+      if distributor == 'DigiKey2d':
+        try:
+          dk_barcode2d = digikey_api.barcode2d(barcode_raw)
+          dk_searchterm = dk_barcode2d.DigiKeyPartNumber
+          curr_dict[kCsvColDistBarcodeData] = dk_barcode2d.model_dump_json()
+        except AssertionError as e:
+          print(f"WARNING: barcode lookup failed: {e}")
+          dk_searchterm = curr_dict[kCsvColSupplierPart]
+      elif distributor == 'Mouser2d':
+        dk_searchterm = curr_dict[kCsvColSupplierPart]
+
+      try:
+        dk_product = digikey_api.product_details(dk_searchterm)
+        curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
+        curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
+        curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
+        print(f"{curr_dict[kCsvColDesc]}, {curr_dict[kCsvColCategory]}")
+      except AssertionError as e:
+        print(f"WARNING: product lookup failed, fields not populated: {e}")
+
 
     while True:
       data = data_queue.get()
 
       if isinstance(data, str):
         if not data and curr_dict is not None:  # return to commit line
-          csvw.writerow(curr_dict)
-          csvfile.flush()
-          records[curr_dict[kCsvColBarcode]] = curr_dict
+          write_line()
           curr_dict = None
           print(f"line saved")
         elif data.startswith('d') and curr_dict is not None:
@@ -193,14 +217,29 @@ def csv_fn():
             print(f"WARNING: product lookup failed, fields not modified: {e}")
         else:
           print(f"unknown command {data}")
+      elif isinstance(data, bytes):  # from serial;
+        if data.startswith(b'[)>'):
+          write_line()
+          curr_dict = None
+          barcode_raw = data.decode('utf-8')
+          barcode_key = str(barcode_raw.encode('unicode_escape').decode('ascii'))
+          if barcode_key in records:
+            print("WARNING: duplicate row")
+
+          curr_dict = {kCsvColBarcode: barcode_key,
+                       kCsvColScanTime: datetime.datetime.now().isoformat()}
+          decoded = Iso15434.from_data(barcode_raw)
+          if decoded is not None:
+            process_iso15434(barcode_raw, decoded, curr_dict)
+          else:
+            print(f"failed to decode iso15434")
+        else:
+          print(f"unknown scanned data {data}")
       elif isinstance(data, zxingcpp.Result):
+        write_line()
+        curr_dict = None
         barcode_raw = data.text
         barcode_key = str(barcode_raw.encode('unicode_escape').decode('ascii'))
-        if curr_dict is not None:  # commit prev line
-          csvw.writerow(curr_dict)
-          csvfile.flush()
-          records[curr_dict[kCsvColBarcode]] = curr_dict
-
         if barcode_key in records:
           print("WARNING: duplicate row")
 
@@ -209,32 +248,10 @@ def csv_fn():
                      kCsvColScanTime: datetime.datetime.now().isoformat()}
         if data.symbology_identifier.startswith(']d'):
           decoded = Iso15434.from_data(data.text)
-          distributor = guess_distributor(data, decoded)
-
-          curr_dict[kCsvColSupplierPart] = decoded.data[FieldSupplierPartNumber].raw
-          curr_dict[kCsvColPackQty] = decoded.data[FieldQuantity].raw
-
-          print(f"{distributor} {curr_dict[kCsvColSupplierPart]} x {curr_dict[kCsvColPackQty]}")
-          if distributor == 'DigiKey2d':
-            try:
-              dk_barcode2d = digikey_api.barcode2d(barcode_raw)
-              dk_searchterm = dk_barcode2d.DigiKeyPartNumber
-              curr_dict[kCsvColDistBarcodeData] = dk_barcode2d.model_dump_json()
-            except AssertionError as e:
-              print(f"WARNING: barcode lookup failed: {e}")
-              dk_searchterm = curr_dict[kCsvColSupplierPart]
-          elif distributor == 'Mouser2d':
-            dk_searchterm = curr_dict[kCsvColSupplierPart]
-
-          try:
-            dk_product = digikey_api.product_details(dk_searchterm)
-            curr_dict[kCsvColDistProdData] = dk_product.model_dump_json()
-            curr_dict[kCsvColDesc] = dk_product.Product.Description.ProductDescription
-            curr_dict[kCsvColCategory] = dk_product.Product.Category.simple_str()
-            print(f"{curr_dict[kCsvColDesc]}, {curr_dict[kCsvColCategory]}")
-          except AssertionError as e:
-            print(f"WARNING: product lookup failed, fields not populated: {e}")
-
+          if decoded is not None:
+            process_iso15434(barcode_raw, decoded, curr_dict)
+          else:
+            print(f"failed to decode iso15434")
         elif data.symbology_identifier.startswith(']C'):
           try:
             dk_barcode1d = digikey_api.barcode(barcode_raw)
@@ -261,8 +278,23 @@ def beep_fn():
     beepy.beep(sound=beep_queue.get())  # beep seems to be blocking, so it gets its own thread
 
 
+def serial_fn(port: serial.Serial):
+  while True:
+    s = port.readline()
+    if s:
+      data_queue.put(s)
+      print(s)
+
+
 # data matrix code based on https://github.com/llpassarelli/dmtxscann/blob/master/dmtxscann.py
 if __name__ == '__main__':
+  parser = argparse.ArgumentParser(description='Parts barcode / datamatrix scanner.')
+  parser.add_argument('csv', type=str,
+                      help='CSV filename to create / append.')
+  parser.add_argument('--serial', type=str,
+                      help='Optional serial port for a connected barcode scanner.')
+  args = parser.parse_args()
+
   # initialize Digikey API
   with open('digikey_api_config.json') as f:
     # IMPORTANT! You will need to set up your DigiKey API access and API keys.
@@ -273,9 +305,9 @@ if __name__ == '__main__':
 
   # initialize output file
   # TODO: validate fieldnames
-  if not os.path.exists(kCsvFilename):
-    print(f"creating new csv {kCsvFilename}")
-    with open(kCsvFilename, 'w', newline='') as csvfile:
+  if not os.path.exists(args.csv):
+    print(f"creating new csv {args.csv}")
+    with open(args.csv, 'w', newline='') as csvfile:
       csvw = csv.DictWriter(csvfile, fieldnames=kCsvHeaders)
       csvw.writeheader()
 
@@ -283,13 +315,20 @@ if __name__ == '__main__':
   cap = cv2.VideoCapture(0)  # TODO configurable
   assert cap.isOpened, "failed to open camera"
 
-  console_thread = Thread(target=console_fn)
-  csv_thread = Thread(target=csv_fn)
-  beep_thread = Thread(target=beep_fn)
+  if args.serial:
+    port = serial.Serial(args.serial, timeout=0.05)
+    serial_thread = Thread(target=serial_fn, args=(port, ))
+    serial_thread.daemon = True
+    serial_thread.start()
 
+  console_thread = Thread(target=console_fn)
   console_thread.start()
+
+  csv_thread = Thread(target=csv_fn, args=(args.csv, ))
   csv_thread.daemon = True
   csv_thread.start()
+
+  beep_thread = Thread(target=beep_fn)
   beep_thread.daemon = True
   beep_thread.start()
 
